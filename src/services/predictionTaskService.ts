@@ -101,27 +101,29 @@ export const predictionTaskService = {
   async createJob(input: PredictionJobInput): Promise<PredictionJobCreated> {
     assertSupabase();
 
-    logger.info('Creating prediction job', { symbol: input.productName, location: input.location });
+    logger.info('Creating prediction job via Edge Function', { symbol: input.productName, location: input.location });
 
-    const { data, error } = await supabase
-      .from('price_predictions')
-      .insert({
-        symbol:          input.productName,
-        location:        input.location,
-        quantity:        input.quantity ?? '1 kg',
-        vendor_language: input.vendorLanguage ?? 'hindi',
-        buyer_message:   input.buyerMessage ?? null,
-        status:          'pending',
-      })
-      .select('job_id, status, created_at')
-      .single();
+    const { data, error } = await supabase.functions.invoke('create-prediction', {
+      body: {
+        productName: input.productName,
+        location: input.location,
+        quantity: input.quantity ?? '1 kg',
+        vendorLanguage: input.vendorLanguage ?? 'hindi',
+        buyerMessage: input.buyerMessage ?? null,
+      },
+    });
 
     if (error) {
-      logger.error('Failed to create prediction job', { error: error.message });
+      // Handle rate limit specifically
+      if (error.context?.status === 429 || error.message?.includes('429')) {
+        logger.warn('Rate limit exceeded for creating prediction job');
+        throw new Error('Too many requests. Please try again later.');
+      }
+      logger.error('Failed to create prediction job via Edge Function', { error: error.message });
       throw new Error(`Failed to create prediction job: ${error.message}`);
     }
 
-    logger.info('Prediction job created', { job_id: data.job_id });
+    logger.info('Prediction job created via Edge Function', { job_id: data.job_id });
     return {
       job_id:     data.job_id,
       status:     'pending',
